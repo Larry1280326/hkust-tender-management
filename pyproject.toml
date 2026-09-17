@@ -1,0 +1,16 @@
+[project]
+name = "hkust-workflow"
+version = "0.1.0"
+description = "HKUST e-Tendering Portal Automation & Gmail Drafter"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "google-api-python-client>=2.200.0",
+    "google-auth-httplib2>=0.4.2",
+    "google-auth-oauthlib>=1.4.1",
+    "playwright>=1.63.0",
+    "pydantic>=2.13.5",
+    "python-dotenv>=1.2.3",
+    "questionary>=2.1.1",
+    "rich>=15.0.0",
+]

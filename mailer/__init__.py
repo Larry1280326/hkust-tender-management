@@ -1,0 +1,1 @@
+"""Mailer module package initialization."""
