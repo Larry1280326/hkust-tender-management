@@ -10,7 +10,23 @@ Automated workflow to:
 
 ## Quick Start
 
-### 1. Configure Credentials
+### 1. First-Time Setup (Environment & Browsers)
+
+If setting up for the first time, synchronize project dependencies and install the Chromium browser for Playwright:
+
+```bash
+# 1. Sync dependencies and create the .venv environment
+uv sync
+
+# 2. Install Playwright browser binary (Chromium)
+uv run playwright install chromium
+```
+
+> **Tip:** While `uv run` will automatically install Python packages on first execution, running `uv sync` ensures your editor/IDE recognizes `.venv` immediately for autocomplete and linting. Installing Chromium is required for portal scraping.
+
+---
+
+### 2. Configure Credentials
 
 Copy `.env.example` to `.env` (or edit existing `.env`):
 
@@ -34,7 +50,7 @@ Place your official Business Registration certificate in `assets/br_certificate.
 
 ---
 
-### 2. Gmail Integration Setup (One-time)
+### 3. Gmail Integration Setup (One-time)
 
 To create drafts directly inside your Gmail account:
 1. Visit the [Google Cloud Console](https://console.cloud.google.com/).
@@ -52,7 +68,7 @@ To create drafts directly inside your Gmail account:
 
 ---
 
-### 3. Run the Automation
+### 4. Run the Automation
 
 Run with `uv`:
 
