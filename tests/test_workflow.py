@@ -3,6 +3,7 @@
 import unittest
 from pathlib import Path
 import tempfile
+import config
 from mailer.template import generate_tender_email
 from mailer.webmail_helper import generate_gmail_compose_url, export_eml_file
 from scraper.tender_parser import EMAIL_REGEX, PHONE_REGEX
@@ -11,24 +12,32 @@ from scraper.tender_parser import EMAIL_REGEX, PHONE_REGEX
 class TestTenderWorkflow(unittest.TestCase):
 
     def test_email_template_generation(self):
-        draft = generate_tender_email(
-            tender_no="PU/2026/001",
-            description="Supply of IT Equipment",
-            recipient_name="Ms. Mary Lee",
-            recipient_email="marylee@ust.hk",
-        )
+        with unittest.mock.patch.multiple(
+            config,
+            COMPANY_NAME="Acme Global Limited",
+            CONTACT_PERSON_NAME="Jane Doe, Manager",
+            CONTACT_EMAIL="tender@acmeglobal.com",
+            CONTACT_PHONE="+852 1234 5678",
+            COMPANY_ADDRESS="123 Science Park Road, Shatin, N.T.",
+        ):
+            draft = generate_tender_email(
+                tender_no="PU/2026/001",
+                description="Supply of IT Equipment",
+                recipient_name="Ms. Mary Lee",
+                recipient_email="marylee@ust.hk",
+            )
 
-        self.assertEqual(
-            draft.subject, "Request for Tender Documents – PU/2026/001 - Supply of IT Equipment"
-        )
-        self.assertEqual(draft.recipient_name, "Ms. Mary Lee")
-        self.assertEqual(draft.recipient_email, "marylee@ust.hk")
-        self.assertIn("Chun King Limited", draft.body)
-        self.assertIn("Kong Ming Foon, Director", draft.body)
-        self.assertIn("account@chunking.com.hk", draft.body)
-        self.assertIn("92300940", draft.body)
-        self.assertIn("Union Hing Yip Factory Building", draft.body)
-        self.assertIn("Business Registration Certificate (BR)", draft.body)
+            self.assertEqual(
+                draft.subject, "Request for Tender Documents – PU/2026/001 - Supply of IT Equipment"
+            )
+            self.assertEqual(draft.recipient_name, "Ms. Mary Lee")
+            self.assertEqual(draft.recipient_email, "marylee@ust.hk")
+            self.assertIn("Acme Global Limited", draft.body)
+            self.assertIn("Jane Doe, Manager", draft.body)
+            self.assertIn("tender@acmeglobal.com", draft.body)
+            self.assertIn("+852 1234 5678", draft.body)
+            self.assertIn("123 Science Park Road, Shatin, N.T.", draft.body)
+            self.assertIn("Business Registration Certificate (BR)", draft.body)
 
     def test_webmail_helper_and_eml_export(self):
         draft = generate_tender_email(

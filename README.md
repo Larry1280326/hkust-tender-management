@@ -4,7 +4,7 @@ Automated workflow to:
 1. Log in to the HKUST e-Tendering Portal (`https://w5.ab.ust.hk/jstd/td_welcome?page=td_login`) and accept the Terms & Conditions.
 2. Scrape all active Tender Notices and parse the enquiry section (Contact Person name, email, phone).
 3. Allow interactive selection of suitable tenders (or keyword filtering).
-4. Automatically draft personalized enquiry emails directly in **Gmail** (with Chun King Limited company details and Business Registration certificate attached).
+4. Automatically draft personalized enquiry emails directly in **Gmail** (with your company details and Business Registration certificate attached).
 
 ---
 
@@ -38,12 +38,12 @@ HKUST_PASSWORD=your_password_here
 # Path to your Business Registration (BR) Certificate file (PDF or image)
 BR_CERTIFICATE_PATH=assets/br_certificate.pdf
 
-# Company Info (Pre-configured for Chun King Limited)
-COMPANY_NAME=Chun King Limited
-CONTACT_PERSON_NAME=Kong Ming Foon, Director
-CONTACT_EMAIL=account@chunking.com.hk
-CONTACT_PHONE=92300940
-COMPANY_ADDRESS=Room A1008, 10/F, Union Hing Yip Factory Building, 20 Hing Yip Street, Kwun Tong, Kowloon
+# Company Info (Loaded from .env)
+COMPANY_NAME=Your Company Name
+CONTACT_PERSON_NAME=Contact Person, Title
+CONTACT_EMAIL=contact@example.com
+CONTACT_PHONE=12345678
+COMPANY_ADDRESS=Your Company Address
 ```
 
 Place your official Business Registration certificate in `assets/br_certificate.pdf` (a placeholder has been provided for testing).
@@ -77,11 +77,43 @@ uv run python app.py
 ```
 
 You will see an interactive menu:
-- **1. Run HKUST Tender Scraper & Draft Emails**: Headless scraping + interactive tender checklist + Gmail draft creation.
-- **2. Run Scraper in Headed Browser**: Shows the browser window in real-time (useful for verifying login visually).
-- **3. Test Gmail Authentication**: Verifies Google Cloud OAuth connection.
-- **4. Load Sample / Mock Tenders**: Test draft generation and email preview immediately without needing HKUST portal credentials.
+- **1. Scrape HKUST Tenders & Draft Emails**: Headless scraping + interactive tender checklist + Gmail draft creation.
+- **2. Read Mailbox & Track HKUST Replies / Apply Tags**: Reads your Gmail INBOX via IMAP, finds HKUST enquiry threads and tender numbers from the subject line, displays a clean summary table, and applies Gmail tags.
+- **3. Use Cached Tenders (Offline Draft Mode)**: Use tenders from local cache without connecting to HKUST portal.
+- **4. Test Google Account Connection**: Verifies Google App Password and IMAP connection.
 - **5. Exit**
+
+#### Direct Command Line Flags:
+
+```bash
+# Read mailbox and display HKUST tender emails / interactive tagging
+uv run python app.py --read-mail
+
+# Scan mailbox and automatically tag all HKUST tender emails in Gmail
+uv run python app.py --tag-tenders
+
+# Test Google IMAP / App Password connection
+uv run python app.py --test
+
+# Run portal scraper with visible Chromium browser
+uv run python app.py --visible
+
+# Display help and all available CLI arguments
+uv run python app.py --help
+
+# Custom scan limit when reading mailbox (e.g. latest 20 emails)
+uv run python app.py --read-mail --limit 20
+```
+
+---
+
+## Gmail Tagging & Tender Tracking
+
+When reading the mailbox, the tool checks each email's sender and title/subject for HKUST tender numbers (e.g. `PU/2026/001` or `EO/2026/012`).
+
+It can automatically apply:
+1. **Base Tag**: `HKUST-Tenders` (configurable via `HKUST_MAIL_TAG` in `.env`).
+2. **Per-Tender Nested Tag**: `HKUST-Tenders/PU-2026-001` (organizes all correspondence for each specific tender into its own clean label in Gmail!).
 
 ---
 
@@ -97,20 +129,17 @@ You will see an interactive menu:
   I am writing to express our interest in Tender No.: <Tender No.>- <Description>.
 
   In accordance with your requirements, here are our company details for your records:
-  Company Name: Chun King Limited
-  Name of Contact Person: Kong Ming Foon, Director
-  Email Address: account@chunking.com.hk
-  Phone Number: 92300940
-  Company Address: Room A1008, 10/F, Union Hing Yip Factory Building, 20 Hing Yip Street, Kwun Tong, Kowloon
+  Company Name: <COMPANY_NAME from .env>
+  Name of Contact Person: <CONTACT_PERSON_NAME from .env>
+  Email Address: <CONTACT_EMAIL from .env>
+  Phone Number: <CONTACT_PHONE from .env>
+  Company Address: <COMPANY_ADDRESS from .env>
 
   Please find attached a copy of our Business Registration Certificate (BR) for your verification.
 
   Kindly confirm receipt and advise of any further steps or requirements. Thank you.
 
-  Best regards,
-  Kong Ming Foon
-  Director
-  Chun King Limited
+  <SIGN_OFF from .env>
   ```
 
 - **Attachment**:

@@ -34,28 +34,35 @@ class TestEndToEndMock(unittest.TestCase):
             ),
         ]
 
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            out_dir = Path(tmp_dir)
+        with unittest.mock.patch.multiple(
+            config,
+            COMPANY_NAME="Sample Enterprise Limited",
+            CONTACT_PERSON_NAME="Alex Smith, Director",
+            CONTACT_EMAIL="alex@sampleenterprise.com",
+            CONTACT_PHONE="+852 9876 5432",
+        ):
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                out_dir = Path(tmp_dir)
 
-            for t in sample_tenders:
-                draft = generate_tender_email(
-                    tender_no=t.tender_no,
-                    description=t.description,
-                    recipient_name=t.contact_person,
-                    recipient_email=t.contact_email,
-                )
+                for t in sample_tenders:
+                    draft = generate_tender_email(
+                        tender_no=t.tender_no,
+                        description=t.description,
+                        recipient_name=t.contact_person,
+                        recipient_email=t.contact_email,
+                    )
 
-                self.assertEqual(
-                    draft.subject,
-                    f"Request for Tender Documents \u2013 {t.tender_no} - {t.description}",
-                )
-                self.assertIn(f"Dear {t.contact_person},", draft.body)
-                self.assertIn(f"Tender No.: {t.tender_no}- {t.description}", draft.body)
-                self.assertIn("Chun King Limited", draft.body)
-                self.assertIn("Kong Ming Foon, Director", draft.body)
-                self.assertIn("account@chunking.com.hk", draft.body)
-                self.assertIn("92300940", draft.body)
-                self.assertIn("Business Registration Certificate (BR)", draft.body)
+                    self.assertEqual(
+                        draft.subject,
+                        f"Request for Tender Documents \u2013 {t.tender_no} - {t.description}",
+                    )
+                    self.assertIn(f"Dear {t.contact_person},", draft.body)
+                    self.assertIn(f"Tender No.: {t.tender_no}- {t.description}", draft.body)
+                    self.assertIn("Sample Enterprise Limited", draft.body)
+                    self.assertIn("Alex Smith, Director", draft.body)
+                    self.assertIn("alex@sampleenterprise.com", draft.body)
+                    self.assertIn("+852 9876 5432", draft.body)
+                    self.assertIn("Business Registration Certificate (BR)", draft.body)
 
                 # EML export
                 eml_file = export_eml_file(draft, out_dir)

@@ -1,12 +1,7 @@
 """Gmail API integration for drafting emails with attachments."""
 
 import base64
-import mimetypes
 from pathlib import Path
-from email.mime.base import MIMEBase
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email import encoders
 from typing import Optional, Dict, Any
 
 from google.auth.transport.requests import Request
@@ -17,6 +12,7 @@ from googleapiclient.errors import HttpError
 
 import config
 from mailer.template import TenderEmailDraft
+from mailer.mime import build_mime_message
 
 # OAuth Scopes: gmail.compose allows creating and modifying drafts without full mailbox access
 SCOPES = ["https://www.googleapis.com/auth/gmail.compose"]
@@ -84,35 +80,8 @@ class GmailService:
         if not self.service:
             self.authenticate()
 
-        # Build MIME Message
-        message = MIMEMultipart()
-        message["to"] = draft_info.recipient_email
-        message["subject"] = draft_info.subject
-
-        # Email Body
-        text_part = MIMEText(draft_info.body, "plain", "utf-8")
-        message.attach(text_part)
-
-        # Attachment (BR Certificate)
-        if draft_info.attachment_path:
-            attach_file = Path(draft_info.attachment_path)
-            if attach_file.exists():
-                content_type, encoding = mimetypes.guess_type(str(attach_file))
-                if content_type is None or encoding is not None:
-                    content_type = "application/octet-stream"
-                main_type, sub_type = content_type.split("/", 1)
-
-                with open(attach_file, "rb") as f:
-                    part = MIMEBase(main_type, sub_type)
-                    part.set_payload(f.read())
-                    encoders.encode_base64(part)
-                    part.add_header(
-                        "Content-Disposition",
-                        f'attachment; filename="{attach_file.name}"',
-                    )
-                    message.attach(part)
-            else:
-                print(f"[!] Warning: Attachment file not found: {attach_file}")
+        # Build standardized MIME message
+        message = build_mime_message(draft_info)
 
         # Encode raw RFC 2822 message to URL-safe base64 string
         raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")

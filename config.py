@@ -13,27 +13,34 @@ ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 load_dotenv(BASE_DIR / ".env")
 
 # HKUST Portal Config
-HKUST_WELCOME_URL = "https://w5.ab.ust.hk/jstd/td_welcome?page=td_login"
-HKUST_LOGIN_URL = "https://w5.ab.ust.hk/jstd/td_login"
+HKUST_WELCOME_URL = os.getenv(
+    "HKUST_WELCOME_URL", "https://w5.ab.ust.hk/jstd/td_welcome?page=td_login"
+)
+HKUST_LOGIN_URL = os.getenv("HKUST_LOGIN_URL", "https://w5.ab.ust.hk/jstd/td_login")
 HKUST_VENDOR_ID = os.getenv("HKUST_VENDOR_ID", "")
 HKUST_PASSWORD = os.getenv("HKUST_PASSWORD", "")
 
 # Playwright session state file (to cache cookies/session)
 SESSION_STATE_PATH = BASE_DIR / "session_state.json"
 
-# Company Information
-COMPANY_NAME = os.getenv("COMPANY_NAME", "Chun King Limited")
-CONTACT_PERSON_NAME = os.getenv("CONTACT_PERSON_NAME", "Kong Ming Foon, Director")
-CONTACT_EMAIL = os.getenv("CONTACT_EMAIL", "account@chunking.com.hk")
-CONTACT_PHONE = os.getenv("CONTACT_PHONE", "92300940")
-COMPANY_ADDRESS = os.getenv(
-    "COMPANY_ADDRESS",
-    "Room A1008, 10/F, Union Hing Yip Factory Building, 20 Hing Yip Street, Kwun Tong, Kowloon",
-)
-SIGN_OFF = os.getenv(
-    "SIGN_OFF",
-    "Best regards,\nKong Ming Foon\nDirector\nChun King Limited",
-)
+# Company Information (Configured solely via .env)
+COMPANY_NAME = os.getenv("COMPANY_NAME", "")
+CONTACT_PERSON_NAME = os.getenv("CONTACT_PERSON_NAME", "")
+CONTACT_EMAIL = os.getenv("CONTACT_EMAIL", "")
+CONTACT_PHONE = os.getenv("CONTACT_PHONE", "")
+COMPANY_ADDRESS = os.getenv("COMPANY_ADDRESS", "")
+
+
+def _build_default_sign_off() -> str:
+    lines = ["Best regards,"]
+    if CONTACT_PERSON_NAME:
+        lines.append(CONTACT_PERSON_NAME)
+    if COMPANY_NAME:
+        lines.append(COMPANY_NAME)
+    return "\n".join(lines)
+
+
+SIGN_OFF = os.getenv("SIGN_OFF", "") or _build_default_sign_off()
 
 # Business Registration (BR) Certificate Path
 BR_CERTIFICATE_PATH = Path(
@@ -41,9 +48,10 @@ BR_CERTIFICATE_PATH = Path(
 )
 
 # Google Account Credentials (App Password / IMAP & SMTP)
-GMAIL_USER = os.getenv("GMAIL_USER", os.getenv("CONTACT_EMAIL", "account@chunking.com.hk"))
+GMAIL_USER = os.getenv("GMAIL_USER", os.getenv("CONTACT_EMAIL", ""))
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "").replace(" ", "")
-GMAIL_DRAFTS_URL = os.getenv("GMAIL_DRAFTS_URL", "https://mail.google.com/mail/u/2/#drafts")
+GMAIL_DRAFTS_URL = os.getenv("GMAIL_DRAFTS_URL", "https://mail.google.com/mail/#drafts")
+HKUST_MAIL_TAG = os.getenv("HKUST_MAIL_TAG", "HKUST Tenders")
 
 # Google API Credentials (Fallback / OAuth)
 GMAIL_CREDENTIALS_PATH = Path(

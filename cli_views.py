@@ -1,0 +1,117 @@
+"""Rich terminal UI views, tables, and presentation helpers."""
+
+from typing import List, Optional
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+
+import config
+from scraper.tender_parser import TenderNotice
+from mailer.email_parser import TenderReceivedEmail
+from mailer.template import TenderEmailDraft
+
+console = Console()
+
+
+def display_welcome_banner():
+    """Print the stylized welcome banner with company and portal configuration."""
+    company_display = config.COMPANY_NAME or "[dim]Not configured[/dim]"
+    contact_display = config.CONTACT_PERSON_NAME or "[dim]Not configured[/dim]"
+    email_display = config.CONTACT_EMAIL or "[dim]Not configured[/dim]"
+    phone_display = config.CONTACT_PHONE or "[dim]Not configured[/dim]"
+
+    banner_text = (
+        "[bold cyan]HKUST e-Tendering Portal Automation & Gmail Drafter[/bold cyan]\n"
+        f"[green]Company:[/green] {company_display} | [green]Contact:[/green] {contact_display}\n"
+        f"[green]Email:[/green] {email_display} | [green]Phone:[/green] {phone_display}\n"
+        f"[dim]Portal URL: {config.HKUST_WELCOME_URL}[/dim]"
+    )
+    console.print(Panel(banner_text, expand=False, border_style="cyan"))
+
+
+def display_tender_table(tenders: List[TenderNotice]):
+    """Render a structured table of active tender notices."""
+    table = Table(
+        title=f"[bold yellow]Available HKUST Tender Notices ({len(tenders)} Total)[/bold yellow]",
+        show_header=True,
+        header_style="bold magenta",
+        expand=True,
+    )
+    table.add_column("#", style="dim", width=4)
+    table.add_column("Tender No.", style="bold cyan", width=16)
+    table.add_column("Description / Subject", style="white", min_width=30)
+    table.add_column("Closing Date", style="green", width=19)
+    table.add_column("Contact Person", style="yellow", width=22)
+    table.add_column("Contact Email", style="blue", width=24)
+
+    for idx, t in enumerate(tenders, start=1):
+        table.add_row(
+            str(idx),
+            t.tender_no,
+            t.description,
+            t.closing_date or "N/A",
+            t.contact_person or "Sir/Madam",
+            t.contact_email or "[red]Missing Email[/red]",
+        )
+
+    console.print(table)
+
+
+def display_received_emails_table(emails: List[TenderReceivedEmail]):
+    """Render a structured table of detected mailbox emails and tags."""
+    table = Table(
+        title=f"[bold yellow]HKUST & Tender Emails in Mailbox ({len(emails)} Found)[/bold yellow]",
+        show_header=True,
+        header_style="bold magenta",
+        expand=True,
+    )
+    table.add_column("#", style="dim", width=4)
+    table.add_column("Date", style="green", width=17)
+    table.add_column("Sender", style="cyan", width=26)
+    table.add_column("Subject", style="white", min_width=32)
+    table.add_column("Detected Tender", style="bold yellow", width=16)
+    table.add_column("Gmail Labels", style="magenta", width=22)
+
+    for idx, em in enumerate(emails, start=1):
+        labels_str = ", ".join(em.labels) if em.labels else "[dim]None[/dim]"
+        clean_date = em.date[:16] if em.date else "N/A"
+        table.add_row(
+            str(idx),
+            clean_date,
+            em.sender[:25],
+            em.subject,
+            em.tender_no or "[dim]-[/dim]",
+            labels_str,
+        )
+
+    console.print(table)
+
+
+def display_draft_preview(sample: TenderEmailDraft, count: int):
+    """Render a preview card of a generated tender email draft."""
+    preview_box = (
+        f"[bold]To:[/bold] {sample.recipient_email}\n"
+        f"[bold]Subject:[/bold] {sample.subject}\n"
+        f"[bold]Attachment:[/bold] {sample.attachment_path or '[yellow]None[/yellow]'}\n\n"
+        f"[dim]{sample.body}[/dim]"
+    )
+    console.print(
+        Panel(
+            preview_box,
+            title=f"Sample Email Preview (1 of {count} selected)",
+            border_style="yellow",
+        )
+    )
+
+
+def display_email_detail(email_item: TenderReceivedEmail):
+    """Render a detailed inspection card for a single received email."""
+    detail_text = (
+        f"[bold]From:[/bold] {email_item.sender}\n"
+        f"[bold]Date:[/bold] {email_item.date}\n"
+        f"[bold]Subject:[/bold] {email_item.subject}\n"
+        f"[bold]Detected Tender No.:[/bold] {email_item.tender_no or 'None'}\n"
+        f"[bold]Current Labels:[/bold] {', '.join(email_item.labels) if email_item.labels else 'None'}\n\n"
+        f"[bold]Subject / Snippet:[/bold]\n{email_item.body_snippet or '[dim]No preview available[/dim]'}"
+    )
+    console.print(Panel(detail_text, title="Email Details", border_style="yellow"))
