@@ -3,7 +3,7 @@
 import argparse
 import sys
 import webbrowser
-from typing import List, Optional
+from typing import List, Optional, Set
 
 # Ensure standard UTF-8 console output for Windows cmd/PowerShell
 if sys.platform == "win32":
@@ -16,14 +16,9 @@ import questionary
 
 import config
 from scraper.auth import HKUSTAuthManager
-from scraper.tender_parser import (
-    TenderParser,
-    TenderNotice,
-    load_tenders_cache,
-    save_tenders_cache,
-)
+from scraper.tender_parser import TenderParser, TenderNotice
 from mailer.template import generate_tender_email, TenderEmailDraft
-from mailer.google_account import GoogleAccountMailer, TenderReceivedEmail
+from mailer.google_account import GoogleAccountMailer
 from mailer.webmail_helper import generate_gmail_compose_url, export_eml_file
 from cli_views import (
     console,
@@ -35,7 +30,10 @@ from cli_views import (
 )
 
 
-def run_scrape_workflow(headless: bool = True) -> List[TenderNotice]:
+def run_scrape_workflow(
+    headless: bool = True,
+    existing_tenders: Optional[Set[str]] = None,
+) -> List[TenderNotice]:
     """Launch browser, log in to HKUST portal, and extract active tenders."""
     auth_mgr = HKUSTAuthManager(headless=headless)
 
@@ -66,11 +64,10 @@ def run_scrape_workflow(headless: bool = True) -> List[TenderNotice]:
                     pct = int(curr / total * 100) if total else 0
                     progress.update(task, completed=pct, description=f"[cyan]Parsing: {name}")
 
-                tenders = parser.extract_tenders(progress_callback=update_progress)
-
-            if tenders:
-                save_tenders_cache(tenders)
-                console.print(f"[bold green][OK] Saved {len(tenders)} tenders to cache.[/bold green]")
+                tenders = parser.extract_tenders(
+                    progress_callback=update_progress,
+                    existing_tenders=existing_tenders,
+                )
 
             return tenders
         except Exception as e:
@@ -84,7 +81,7 @@ def select_suitable_tenders(
     tenders: List[TenderNotice],
     preselected_refs: Optional[set] = None,
 ) -> List[TenderNotice]:
-    """Interactive checklist or keyword filtering for tender selection."""
+    """Interactive checklist or select all for tender selection."""
     if not tenders:
         return []
 
@@ -93,43 +90,41 @@ def select_suitable_tenders(
         choices=[
             "1. Interactive Checklist (pick individual tenders)",
             "2. Select All tenders",
-            "3. Keyword Filter (match keywords in title/description)",
-            "4. Cancel / Exit",
+            "3. Cancel / Exit",
         ],
     ).ask()
 
-    if not mode or mode.startswith("4"):
+    if not mode or mode.startswith("3"):
         return []
 
     if mode.startswith("1"):
-        choices = [
-            questionary.Choice(
-                title=f"{t.tender_no} - {t.description[:55]}... ({t.contact_person} <{t.contact_email}>)",
-                value=t,
-                checked=(t.tender_no in preselected_refs) if preselected_refs else False,
+        choices = []
+        for t in tenders:
+            contact_info = ""
+            if t.contact_person and t.contact_email:
+                contact_info = f" ({t.contact_person} <{t.contact_email}>)"
+            elif t.contact_email:
+                contact_info = f" (<{t.contact_email}>)"
+            elif t.contact_person:
+                contact_info = f" ({t.contact_person})"
+
+            is_checked = False
+            if preselected_refs:
+                is_checked = t.tender_no in preselected_refs
+
+            choices.append(
+                questionary.Choice(
+                    title=f"{t.description}{contact_info}",
+                    value=t,
+                    checked=is_checked,
+                )
             )
-            for t in tenders
-        ]
         console.print("[dim]Tip: Space to toggle, 'a' to select all, Enter to confirm.[/dim]")
         selected = questionary.checkbox("Select tenders to draft emails for:", choices=choices).ask()
         return selected or []
 
     if mode.startswith("2"):
         return tenders
-
-    if mode.startswith("3"):
-        kw_input = questionary.text(
-            "Enter keywords to match (comma separated, e.g. IT, software, renovation):"
-        ).ask()
-        if not kw_input:
-            return []
-        keywords = [k.strip().lower() for k in kw_input.split(",") if k.strip()]
-        matched = [
-            t for t in tenders
-            if any(k in t.description.lower() or k in t.tender_no.lower() for k in keywords)
-        ]
-        console.print(f"[+] Found [bold green]{len(matched)}[/bold green] matching tenders.")
-        return matched
 
     return []
 
@@ -185,27 +180,38 @@ def handle_tender_selection_and_drafting(tenders: List[TenderNotice]) -> None:
 
 def draft_emails_for_tenders(drafts: List[TenderEmailDraft]) -> None:
     """Execute draft creation via Google App Password (IMAP) or offline EML fallback."""
-    drafted_successfully = False
+    created_count = 0
 
     # 1. Primary: Google Account App Password (IMAP)
     if config.GMAIL_APP_PASSWORD:
         console.print("[*] Connecting to Gmail via App Password (IMAP)...", style="cyan")
         account_mailer = GoogleAccountMailer()
-        try:
-            for d in drafts:
-                if not d.recipient_email:
-                    console.print(f"[yellow]Skipping {d.tender_no}: No recipient email.[/yellow]")
-                    continue
-                account_mailer.save_draft(d)
-                console.print(
-                    f"  [green][OK][/green] Saved to Gmail 'Drafts' for [bold]{d.tender_no}[/bold] (To: {d.recipient_email})"
-                )
-            drafted_successfully = True
-        except Exception as e:
-            console.print(f"[!] Note on App Password drafting: {e}", style="yellow")
+        for d in drafts:
+            if not d.recipient_email:
+                console.print(f"[yellow]Skipping {d.tender_no}: No recipient email.[/yellow]")
+                continue
+            try:
+                success, applied_tags = account_mailer.save_draft(d, apply_tags=True)
+                if success:
+                    created_count += 1
+                    desc_str = f" - {d.description}" if d.description else ""
+                    console.print(
+                        f"  [green][OK][/green] Saved to Gmail 'Drafts' for [bold]{d.tender_no}[/bold]{desc_str} (To: {d.recipient_email})"
+                    )
+            except Exception as e:
+                console.print(f"[!] Note on drafting {d.tender_no} via App Password: {e}", style="yellow")
 
-    # 2. Fallback: Offline .EML files + 1-Click Direct Gmail Compose Web Links
-    if not drafted_successfully:
+    # 2. If saved via App Password, open browser
+    if created_count > 0:
+        console.print(f"\n[bold green]Success! {created_count} draft(s) saved directly to your Gmail 'Drafts' folder.[/bold green]")
+        drafts_url = config.GMAIL_DRAFTS_URL
+        console.print(f"[*] Opening Gmail Drafts: [bold underline cyan]{drafts_url}[/bold underline cyan]")
+        try:
+            webbrowser.open(drafts_url)
+        except Exception as e:
+            console.print(f"[!] Could not launch browser: {e}", style="yellow")
+    else:
+        # Fallback: Offline .EML files + 1-Click Direct Gmail Compose Web Links
         console.print("[*] Generating fallback offline .EML files and direct Gmail web links...", style="cyan")
         output_dir = config.BASE_DIR / "output_drafts"
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -221,17 +227,9 @@ def draft_emails_for_tenders(drafts: List[TenderEmailDraft]) -> None:
             console.print(f"  * Direct Gmail Compose URL:\n    {web_link}")
 
         console.print("\n[green]Done! EML files exported to output_drafts directory.[/green]")
-    else:
-        console.print("\n[bold green]Success! All drafts saved directly to your Gmail 'Drafts' folder.[/bold green]")
-        drafts_url = config.GMAIL_DRAFTS_URL
-        console.print(f"[*] Opening Gmail Drafts: [bold underline cyan]{drafts_url}[/bold underline cyan]")
-        try:
-            webbrowser.open(drafts_url)
-        except Exception as e:
-            console.print(f"[!] Could not launch browser: {e}", style="yellow")
 
 
-def handle_read_and_tag_mailbox(auto_tag: bool = False, limit: int = 50) -> None:
+def handle_read_and_tag_mailbox(auto_tag: bool = False, limit: int = 50, known_tenders: Optional[List[str]] = None) -> None:
     """Fetch emails from mailbox, display summary table, and apply tags in Gmail."""
     if not config.GMAIL_APP_PASSWORD:
         console.print(
@@ -241,7 +239,6 @@ def handle_read_and_tag_mailbox(auto_tag: bool = False, limit: int = 50) -> None
         return
 
     mailer = GoogleAccountMailer()
-    known_tenders = [t.tender_no for t in load_tenders_cache()]
     target_folder = mailer.find_tender_tag_folder() or "INBOX"
 
     console.print(
@@ -271,13 +268,14 @@ def handle_read_and_tag_mailbox(auto_tag: bool = False, limit: int = 50) -> None
             emails=emails,
             tag_prefix=tag_prefix,
             folder=target_folder,
-            per_tender_tag=True,
+            per_tender_tag=False,
             known_tenders=known_tenders,
         )
         console.print(f"[bold green][OK] Processed {len(summary)} emails in Gmail successfully![/bold green]")
         for item in summary:
+            t_name = item.get("tender_name") or item.get("tender_no") or "General HKUST"
             console.print(
-                f"  * [bold]{item['tender_no'] or 'General HKUST'}[/bold]: Applied tags {item['applied_tags']} "
+                f"  * [bold]{t_name}[/bold]: Applied tags {item['applied_tags']} "
                 f"to '{item['subject'][:45]}...'"
             )
         return
@@ -287,7 +285,7 @@ def handle_read_and_tag_mailbox(auto_tag: bool = False, limit: int = 50) -> None
         action = questionary.select(
             "What would you like to do with these emails?",
             choices=[
-                "1. Apply Gmail tags to detected tenders (e.g. 'HKUST Tenders/<tender_no>')",
+                f"1. Apply Gmail tag to detected emails ('{tag_prefix}')",
                 "2. View snippet / details of an email",
                 f"3. Switch folder (currently: '{target_folder}')",
                 "4. Back to Main Menu / Exit",
@@ -298,19 +296,20 @@ def handle_read_and_tag_mailbox(auto_tag: bool = False, limit: int = 50) -> None
             break
 
         if action.startswith("1"):
-            console.print(f"\n[*] Applying Gmail tags under '[bold]{tag_prefix}[/bold]'...", style="cyan")
-            with console.status("[cyan]Applying Gmail labels via IMAP...", spinner="dots"):
+            console.print(f"\n[*] Applying Gmail tag '[bold]{tag_prefix}[/bold]'...", style="cyan")
+            with console.status("[cyan]Applying Gmail label via IMAP...", spinner="dots"):
                 summary = mailer.tag_hkust_tender_emails(
                     emails=emails,
                     tag_prefix=tag_prefix,
                     folder=target_folder,
-                    per_tender_tag=True,
+                    per_tender_tag=False,
                     known_tenders=known_tenders,
                 )
             console.print(f"[bold green][OK] Successfully tagged {len(summary)} emails in Gmail![/bold green]")
             for item in summary:
+                t_name = item.get("tender_name") or item.get("tender_no") or "General HKUST"
                 console.print(
-                    f"  * [bold]{item['tender_no'] or 'General HKUST'}[/bold]: {item['applied_tags']} "
+                    f"  * [bold]{t_name}[/bold]: {item['applied_tags']} "
                     f"-> '{item['subject'][:40]}...'"
                 )
             break
@@ -344,6 +343,32 @@ def handle_read_and_tag_mailbox(auto_tag: bool = False, limit: int = 50) -> None
                 display_received_emails_table(emails)
 
 
+def get_processed_tender_numbers() -> Set[str]:
+    """Check emails with tag HKUST Tenders in Gmail and return existing tender numbers."""
+    mailer = GoogleAccountMailer()
+    if not mailer.is_configured():
+        return set()
+
+    console.print(
+        f"[*] Checking mailbox for tag '[bold]{config.HKUST_MAIL_TAG}[/bold]' before parsing...",
+        style="cyan",
+    )
+    with console.status(
+        f"[cyan]Scanning '{config.HKUST_MAIL_TAG}' for existing tender emails...",
+        spinner="dots",
+    ):
+        existing = mailer.get_existing_tender_numbers()
+
+    if existing:
+        console.print(
+            f"[+] Found [bold green]{len(existing)}[/bold green] tender(s) already drafted/sent in Gmail: "
+            f"[yellow]{', '.join(sorted(existing))}[/yellow]"
+        )
+    else:
+        console.print(f"[dim]No existing emails found under tag '{config.HKUST_MAIL_TAG}'.[/dim]")
+    return existing
+
+
 def interactive_menu():
     """Display main CLI menu and route user choices."""
     choice = questionary.select(
@@ -351,38 +376,34 @@ def interactive_menu():
         choices=[
             "1. Scrape HKUST Tenders & Draft Emails",
             "2. Read Mailbox & Track HKUST Replies / Apply Tags",
-            "3. Use Cached Tenders (Offline Draft Mode)",
-            "4. Test Google Account Connection",
-            "5. Exit",
+            "3. Test Google Account Connection",
+            "4. Exit",
         ],
     ).ask()
 
-    if not choice or choice.startswith("5"):
+    if not choice or choice.startswith("4"):
         console.print("[yellow]Exiting.[/yellow]")
         return
 
     if choice.startswith("1"):
+        existing_tenders = get_processed_tender_numbers()
         console.print("[*] Directly fetching all active tenders (headless)...", style="cyan")
-        tenders = run_scrape_workflow(headless=True)
+        tenders = run_scrape_workflow(headless=True, existing_tenders=existing_tenders)
         if tenders:
             display_tender_table(tenders)
             handle_tender_selection_and_drafting(tenders)
         else:
-            console.print("[bold red]No active tenders found or failed to fetch.[/bold red]")
+            if existing_tenders:
+                console.print(
+                    "\n[bold green][OK] All active tenders on the HKUST portal have already been drafted/sent in Gmail! No new tenders to process.[/bold green]"
+                )
+            else:
+                console.print("[yellow]No active tenders found or failed to fetch.[/yellow]")
 
     elif choice.startswith("2"):
         handle_read_and_tag_mailbox(auto_tag=False)
 
     elif choice.startswith("3"):
-        cached = load_tenders_cache()
-        if cached:
-            console.print(f"[*] Loaded {len(cached)} cached tenders.", style="cyan")
-            display_tender_table(cached)
-            handle_tender_selection_and_drafting(cached)
-        else:
-            console.print("[yellow]No cached tenders found. Run live scrape first.[/yellow]")
-
-    elif choice.startswith("4"):
         console.print(f"[*] Testing Google App Password connection for {config.GMAIL_USER}...", style="cyan")
         mailer = GoogleAccountMailer()
         success, msg = mailer.test_connection()
@@ -401,7 +422,6 @@ def parse_cli_args():
     parser.add_argument("--test", action="store_true", help="Test Google IMAP / App Password connection")
     parser.add_argument("--read-mail", action="store_true", help="Read mailbox and inspect HKUST tender emails")
     parser.add_argument("--tag-tenders", action="store_true", help="Scan mailbox and automatically tag tender emails")
-    parser.add_argument("--cached", action="store_true", help="Load cached tenders in offline draft mode")
     parser.add_argument("--visible", action="store_true", help="Run scraper with visible Chromium browser")
     parser.add_argument("--limit", type=int, default=50, help="Maximum number of emails to scan")
     return parser.parse_args()
@@ -429,25 +449,24 @@ def main():
         handle_read_and_tag_mailbox(auto_tag=True, limit=args.limit)
         return
 
-    if args.cached:
-        cached = load_tenders_cache()
-        if cached:
-            console.print(f"[*] Loaded {len(cached)} cached tenders.", style="cyan")
-            display_tender_table(cached)
-            handle_tender_selection_and_drafting(cached)
-        else:
-            console.print("[yellow]No cache found, fetching live...[/yellow]")
-        return
-
     if args.visible:
+        existing_tenders = get_processed_tender_numbers()
         console.print("[*] Directly fetching all active tenders (visible browser)...", style="cyan")
-        tenders = run_scrape_workflow(headless=False)
+        tenders = run_scrape_workflow(headless=False, existing_tenders=existing_tenders)
         if tenders:
             display_tender_table(tenders)
             handle_tender_selection_and_drafting(tenders)
+        else:
+            if existing_tenders:
+                console.print(
+                    "\n[bold green][OK] All active tenders on the HKUST portal have already been drafted/sent in Gmail! No new tenders to process.[/bold green]"
+                )
+            else:
+                console.print("[yellow]No active tenders found or failed to fetch.[/yellow]")
         return
 
     interactive_menu()
+
 
 
 if __name__ == "__main__":

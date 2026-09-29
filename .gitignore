@@ -11,13 +11,9 @@ wheels/
 
 # Environment & Secrets
 .env
-credentials.json
-token.json
-session_state.json
 
-# Local caches & exported drafts
+# Exported drafts
 output_drafts/
-tenders_cache.json
 
 # Certificates & Assets
 assets/*.pdf

@@ -9,6 +9,10 @@ TEMPLATE_PATTERN = re.compile(
     r"Request for Tender Documents\s*[–\-]\s*([A-Za-z0-9/_\-\s]+?)\s*[–\-]",
     re.IGNORECASE,
 )
+TEMPLATE_FULL_PATTERN = re.compile(
+    r"Request for Tender Documents\s*[–\-]\s*([A-Za-z0-9/_\-\s]+?)\s*[–\-]\s*([^\r\n]+)",
+    re.IGNORECASE,
+)
 HKUST_TN_PATTERN = re.compile(
     r"\b(TN[A-Z0-9]{6,12}(?:\s*PQ)?)\b",
     re.IGNORECASE,
@@ -37,6 +41,7 @@ class TenderReceivedEmail:
     date: str
     body_snippet: str
     tender_no: Optional[str] = None
+    tender_name: Optional[str] = None
     labels: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -110,46 +115,59 @@ def extract_tender_no_from_text(
     return None
 
 
-def extract_body_snippet(msg, max_len: int = 200) -> str:
-    """Extract a short readable plain-text preview from email message object."""
-    body_text = ""
-    try:
-        if msg.is_multipart():
-            for part in msg.walk():
-                ctype = part.get_content_type()
-                cdispo = str(part.get("Content-Disposition", ""))
-                if ctype == "text/plain" and "attachment" not in cdispo:
-                    payload = part.get_payload(decode=True)
-                    if payload:
-                        charset = part.get_content_charset() or "utf-8"
-                        try:
-                            body_text = payload.decode(charset, errors="replace")
-                        except Exception:
-                            body_text = payload.decode("utf-8", errors="replace")
-                        break
-                elif ctype == "text/html" and "attachment" not in cdispo and not body_text:
-                    payload = part.get_payload(decode=True)
-                    if payload:
-                        charset = part.get_content_charset() or "utf-8"
-                        try:
-                            html_text = payload.decode(charset, errors="replace")
-                        except Exception:
-                            html_text = payload.decode("utf-8", errors="replace")
-                        body_text = re.sub(r"<[^>]+>", " ", html_text)
-        else:
-            payload = msg.get_payload(decode=True)
-            if payload:
-                charset = msg.get_content_charset() or "utf-8"
-                try:
-                    body_text = payload.decode(charset, errors="replace")
-                except Exception:
-                    body_text = payload.decode("utf-8", errors="replace")
-    except Exception:
-        pass
+def normalize_tender_ref(ref: Optional[str]) -> str:
+    """Normalize tender number for consistent comparison (e.g. TNP2600099, PU/2026/001)."""
+    if not ref:
+        return ""
+    return re.sub(r"[\s\-_/]", "", ref).upper()
 
-    clean = " ".join(body_text.split())
+
+def extract_tender_name_from_text(text: str) -> Optional[str]:
+    """Extract tender title/description from email subject or text."""
+    if not text:
+        return None
+
+    # 1. Match standard template: Request for Tender Documents - <No> - <Description>
+    match = TEMPLATE_FULL_PATTERN.search(text)
+    if match:
+        desc = match.group(2).strip()
+        desc = re.sub(r"\[.*?\]", "", desc).strip()
+        if len(desc) >= 3:
+            return desc
+
+    # 2. Match pattern: <tender_no> - <description>
+    dash_match = re.search(
+        r"(?:TN[A-Z0-9]{6,12}|[A-Z]{2,6}/\d{4}/\d{2,5})\s*[–\-:]\s*([^\r\n]+)",
+        text,
+        re.IGNORECASE,
+    )
+    if dash_match:
+        desc = dash_match.group(1).strip()
+        desc = re.sub(r"\[.*?\]", "", desc).strip()
+        if len(desc) >= 3 and not any(w in desc.lower() for w in ["re:", "fwd:"]):
+            return desc
+
+    return None
+
+
+def sanitize_tag_component(name: str, max_len: int = 100) -> str:
+    """Sanitize a tender name to be a valid, clean Gmail label component.
+
+    Replaces slashes, backslashes, quotes, and ampersands to avoid IMAP UTF-7 parse errors
+    and unintended sub-label hierarchies.
+    """
+    if not name:
+        return ""
+    # Replace & with 'and' to prevent IMAP modified UTF-7 escape errors (RFC 3501)
+    clean = re.sub(r"&", "and", name)
+    # Replace slashes, backslashes, and quotes with hyphens
+    clean = re.sub(r'[/\\"]', "-", clean).strip()
+    # Normalize consecutive whitespace
+    clean = re.sub(r"\s+", " ", clean)
+    # Collapse multiple consecutive hyphens
+    clean = re.sub(r"-+", "-", clean).strip(" -")
     if len(clean) > max_len:
-        return clean[:max_len] + "..."
+        clean = clean[:max_len].rstrip(" -")
     return clean
 
 

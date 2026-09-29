@@ -12,7 +12,7 @@ import time
 from contextlib import contextmanager
 from email import message_from_bytes
 import re
-from typing import Optional, Tuple, List, Dict, Any, Generator
+from typing import Optional, Tuple, List, Dict, Any, Generator, Set
 
 import config
 from mailer.template import TenderEmailDraft
@@ -21,29 +21,15 @@ from mailer.email_parser import (
     TenderReceivedEmail,
     decode_mime_words,
     extract_tender_no_from_text,
-    extract_body_snippet,
+    extract_tender_name_from_text,
+    sanitize_tag_component,
     parse_gmail_labels,
-    TEMPLATE_PATTERN,
     HKUST_TN_PATTERN,
     HKUST_CODE_PATTERN,
-    TENDER_REF_KEYWORD_PATTERN,
-    GENERIC_IGNORE_WORDS,
 )
 
-# Re-export for backward compatibility
-__all__ = [
-    "GoogleAccountMailer",
-    "TenderReceivedEmail",
-    "decode_mime_words",
-    "extract_tender_no_from_text",
-    "extract_body_snippet",
-    "parse_gmail_labels",
-    "TEMPLATE_PATTERN",
-    "HKUST_TN_PATTERN",
-    "HKUST_CODE_PATTERN",
-    "TENDER_REF_KEYWORD_PATTERN",
-    "GENERIC_IGNORE_WORDS",
-]
+__all__ = ["GoogleAccountMailer"]
+
 
 
 class GoogleAccountMailer:
@@ -111,11 +97,21 @@ class GoogleAccountMailer:
 
         return "[Gmail]/Drafts"
 
-    def save_draft(self, draft_info: TenderEmailDraft) -> bool:
-        """Append message directly into Gmail's Drafts folder using IMAP."""
+    def save_draft(
+        self,
+        draft_info: TenderEmailDraft,
+        apply_tags: bool = True,
+        tag_prefix: Optional[str] = None,
+    ) -> Tuple[bool, List[str]]:
+        """Append message directly into Gmail's Drafts folder using IMAP and apply tender tags.
+        
+        Returns:
+            Tuple[bool, List[str]]: (Success boolean, List of applied Gmail tags)
+        """
         msg = build_mime_message(draft_info, from_email=self.username)
         raw_bytes = msg.as_bytes()
 
+        applied_tags: List[str] = []
         with self.imap_session() as mail:
             drafts_folder = self._find_drafts_folder(mail)
             res, data = mail.append(
@@ -124,9 +120,61 @@ class GoogleAccountMailer:
                 imaplib.Time2Internaldate(time.time()),
                 raw_bytes,
             )
-            if res == "OK":
-                return True
-            raise RuntimeError(f"Failed to append draft to {drafts_folder}: {data}")
+            if res != "OK":
+                raise RuntimeError(f"Failed to append draft to {drafts_folder}: {data}")
+
+            if apply_tags:
+                prefix = tag_prefix or config.HKUST_MAIL_TAG
+                tags_to_apply = [prefix]
+
+                # Ensure label exists in Gmail
+                for tag in tags_to_apply:
+                    try:
+                        mail.create(f'"{tag}"')
+                    except Exception:
+                        pass
+
+                # Parse UID from APPENDUID (RFC 4315) or locate newest draft
+                new_uid = None
+                if data and data[0]:
+                    meta_str = (
+                        data[0].decode("utf-8", errors="ignore")
+                        if isinstance(data[0], bytes)
+                        else str(data[0])
+                    )
+                    uid_match = re.search(r"APPENDUID\s+\d+\s+(\d+)", meta_str)
+                    if uid_match:
+                        new_uid = uid_match.group(1)
+
+                if not new_uid:
+                    try:
+                        mail.select(f'"{drafts_folder}"')
+                        typ, sdata = mail.uid("SEARCH", None, f'HEADER Subject "{draft_info.subject}"')
+                        if typ == "OK" and sdata and sdata[0]:
+                            uids = sdata[0].split()
+                            if uids:
+                                new_uid = (
+                                    uids[-1].decode("utf-8")
+                                    if isinstance(uids[-1], bytes)
+                                    else str(uids[-1])
+                                )
+                    except Exception:
+                        pass
+
+                if new_uid:
+                    try:
+                        mail.select(f'"{drafts_folder}"')
+                        for tag in tags_to_apply:
+                            try:
+                                store_res, _ = mail.uid("STORE", new_uid, "+X-GM-LABELS", f'("{tag}")')
+                                if store_res == "OK":
+                                    applied_tags.append(tag)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+
+        return True, applied_tags
 
     def send_email(self, draft_info: TenderEmailDraft) -> bool:
         """Send email directly using Gmail SMTP."""
@@ -180,6 +228,48 @@ class GoogleAccountMailer:
             pass
         return None
 
+    def get_existing_tender_numbers(self) -> Set[str]:
+        """Fetch all tender reference numbers from emails tagged with HKUST Tenders in Gmail."""
+        if not self.is_configured():
+            return set()
+
+        tender_folder = self.find_tender_tag_folder()
+        if not tender_folder:
+            return set()
+
+        existing_numbers: Set[str] = set()
+        try:
+            with self.imap_session(folder=tender_folder, readonly=True) as mail:
+                typ, data = mail.uid("SEARCH", None, "ALL")
+                if typ == "OK" and data and data[0]:
+                    uids = data[0].split()
+                    if uids:
+                        uid_batch = b",".join(uids)
+                        fetch_status, fetch_data = mail.uid(
+                            "FETCH",
+                            uid_batch,
+                            "(BODY.PEEK[HEADER.FIELDS (SUBJECT)])",
+                        )
+                        if fetch_status == "OK" and fetch_data:
+                            for item in fetch_data:
+                                if not isinstance(item, tuple) or len(item) < 2:
+                                    continue
+                                hdr_msg = message_from_bytes(item[1])
+                                subject = decode_mime_words(hdr_msg.get("Subject", ""))
+                                ref = extract_tender_no_from_text(subject)
+                                if ref:
+                                    existing_numbers.add(ref)
+                                for tn in HKUST_TN_PATTERN.findall(subject):
+                                    if tn:
+                                        existing_numbers.add(tn.strip())
+                                for code in HKUST_CODE_PATTERN.findall(subject):
+                                    if code:
+                                        existing_numbers.add(code.strip())
+        except Exception:
+            pass
+
+        return existing_numbers
+
     def read_emails(
         self,
         folder: str = "INBOX",
@@ -232,6 +322,7 @@ class GoogleAccountMailer:
                 date_str = decode_mime_words(hdr_msg.get("Date", ""))
 
                 tender_no = extract_tender_no_from_text(subject, known_tenders=known_tenders)
+                tender_name = extract_tender_name_from_text(subject)
 
                 results.append(
                     TenderReceivedEmail(
@@ -242,6 +333,7 @@ class GoogleAccountMailer:
                         date=date_str,
                         body_snippet=subject,
                         tender_no=tender_no,
+                        tender_name=tender_name,
                         labels=labels,
                     )
                 )
@@ -293,41 +385,12 @@ class GoogleAccountMailer:
 
         return filtered
 
-    def add_gmail_label(
-        self,
-        uid: str,
-        label_name: str,
-        folder: str = "INBOX",
-        client: Optional[imaplib.IMAP4_SSL] = None,
-    ) -> bool:
-        """Add a Gmail label/tag to a specific email by UID."""
-        clean_label = label_name.strip()
-        if not clean_label:
-            return False
-
-        def _apply_store(mail_client: imaplib.IMAP4_SSL) -> bool:
-            try:
-                mail_client.create(f'"{clean_label}"')
-            except Exception:
-                pass
-            status, _ = mail_client.select(f'"{folder}"')
-            if status != "OK":
-                mail_client.select(folder)
-            res, _ = mail_client.uid("STORE", uid, "+X-GM-LABELS", f'("{clean_label}")')
-            return res == "OK"
-
-        if client:
-            return _apply_store(client)
-
-        with self.imap_session() as mail:
-            return _apply_store(mail)
-
     def tag_hkust_tender_emails(
         self,
         emails: Optional[List[TenderReceivedEmail]] = None,
         tag_prefix: Optional[str] = None,
         folder: str = "INBOX",
-        per_tender_tag: bool = True,
+        per_tender_tag: bool = False,
         known_tenders: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Tag HKUST tender emails in Gmail by checking the email title/subject."""
@@ -348,10 +411,12 @@ class GoogleAccountMailer:
 
             for e in emails:
                 tags_to_apply = [prefix]
-                if per_tender_tag and e.tender_no:
-                    safe_no = e.tender_no.replace("/", "-")
-                    tender_tag = f"{prefix}/{safe_no}"
-                    tags_to_apply.append(tender_tag)
+                tender_label_name = e.tender_name or e.tender_no
+                if per_tender_tag and tender_label_name:
+                    safe_name = sanitize_tag_component(tender_label_name)
+                    if safe_name:
+                        tender_tag = f"{prefix}/{safe_name}"
+                        tags_to_apply.append(tender_tag)
 
                 applied: List[str] = []
                 for tag in tags_to_apply:
@@ -366,17 +431,21 @@ class GoogleAccountMailer:
                             pass
                         created_labels.add(tag)
 
-                    res, _ = mail.uid("STORE", e.uid, "+X-GM-LABELS", f'("{tag}")')
-                    if res == "OK":
-                        applied.append(tag)
-                        if tag not in e.labels:
-                            e.labels.append(tag)
+                    try:
+                        res, _ = mail.uid("STORE", e.uid, "+X-GM-LABELS", f'("{tag}")')
+                        if res == "OK":
+                            applied.append(tag)
+                            if tag not in e.labels:
+                                e.labels.append(tag)
+                    except Exception:
+                        pass
 
                 tagged_summary.append({
                     "uid": e.uid,
                     "subject": e.subject,
                     "sender": e.sender,
                     "tender_no": e.tender_no,
+                    "tender_name": e.tender_name,
                     "applied_tags": applied,
                 })
 

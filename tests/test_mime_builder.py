@@ -93,6 +93,39 @@ class TestMimeBuilderAndSession(unittest.TestCase):
 
         mock_imap.logout.assert_called_once()
 
+    @patch("imaplib.IMAP4_SSL")
+    def test_save_draft_with_automatic_tagging(self, mock_imap_cls):
+        mock_imap = MagicMock()
+        mock_imap_cls.return_value = mock_imap
+
+        # Mock list() to return standard drafts folder
+        mock_imap.list.return_value = ("OK", [b'(\\Drafts) "/" "[Gmail]/Drafts"'])
+        # Mock append() returning RFC 4315 APPENDUID response
+        mock_imap.append.return_value = ("OK", [b"[APPENDUID 12345 777] (Success)"])
+        mock_imap.uid.return_value = ("OK", [b"OK"])
+
+        mailer = GoogleAccountMailer(username="user@test.com", app_password="password123")
+
+        # Verify draft creation applies base HKUST Tenders tag
+        draft = TenderEmailDraft(
+            tender_no="TNA2600090",
+            description="Automated Laboratory Liquid Handling and Sampling System",
+            recipient_name="Officer",
+            recipient_email="tender@ust.hk",
+            subject="Request for Tender Documents – TNA2600090 - Automated Laboratory Liquid Handling and Sampling System",
+            body="Draft body here",
+        )
+
+        success, applied_tags = mailer.save_draft(draft, apply_tags=True, tag_prefix="HKUST Tenders")
+        self.assertTrue(success)
+        self.assertEqual(applied_tags, ["HKUST Tenders"])
+
+        # Verify IMAP append was called
+        mock_imap.append.assert_called_once()
+        # Verify STORE was called to attach label to uid 777
+        calls = [c[0] for c in mock_imap.uid.call_args_list]
+        self.assertTrue(any(c[0] == "STORE" and c[1] == "777" for c in calls))
+
 
 if __name__ == "__main__":
     unittest.main()

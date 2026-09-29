@@ -1,20 +1,16 @@
 """Scraper for HKUST Tender Notices and Enquiry contact details."""
 
-import json
 import re
 from dataclasses import dataclass, asdict
-from pathlib import Path
-from typing import List, Optional, Dict, Any, Callable, Tuple
+from typing import List, Optional, Dict, Any, Callable, Tuple, Set
 from playwright.sync_api import Page
 
 import config
+from mailer.email_parser import normalize_tender_ref
 
 EMAIL_REGEX = re.compile(r"([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", re.IGNORECASE)
 CONTACT_PERSON_REGEX = re.compile(r"Contact\s+Person\s*[:：]\s*([^\n\r]+)", re.IGNORECASE)
 PHONE_REGEX = re.compile(r"(\+?852[-\s]?)?[2-9]\d{3}[-\s]?\d{4}")
-CACHE_FILE = config.BASE_DIR / "tenders_cache.json"
-
-
 @dataclass
 class TenderNotice:
     """Structured data for an active HKUST Tender notice."""
@@ -26,35 +22,17 @@ class TenderNotice:
     contact_phone: Optional[str] = None
     tender_type: Optional[str] = None
     raw_enquiry: Optional[str] = None
+    already_processed: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
 
-def save_tenders_cache(tenders: List[TenderNotice], cache_path: Optional[Path] = None) -> None:
-    """Save parsed tender list to a local JSON cache file."""
-    path = cache_path or CACHE_FILE
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump([t.to_dict() for t in tenders], f, ensure_ascii=False, indent=2)
-
-
-def load_tenders_cache(cache_path: Optional[Path] = None) -> List[TenderNotice]:
-    """Load tender list from a local JSON cache file."""
-    path = cache_path or CACHE_FILE
-    if not path.exists():
-        return []
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return [TenderNotice(**d) for d in data]
-    except Exception:
-        return []
-
-
 class TenderParser:
     """Parses tender notices and extracts enquiry contact information."""
 
-    TENDER_NOTICE_URL = "https://w5.ab.ust.hk/jstd/td_tender_notice"
+    TENDER_NOTICE_URL = config.HKUST_TENDER_NOTICE_URL
+
 
     def __init__(self, page: Page):
         self.page = page
@@ -101,8 +79,17 @@ class TenderParser:
     def extract_tenders(
         self,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
+        existing_tenders: Optional[Set[str]] = None,
     ) -> List[TenderNotice]:
-        """Extract all active tender notices and their enquiry contact info."""
+        """Extract all active tender notices and their enquiry contact info, skipping already processed ones."""
+        normalized_existing: Set[str] = set()
+        if existing_tenders:
+            for t_ref in existing_tenders:
+                if t_ref:
+                    norm = normalize_tender_ref(t_ref)
+                    if norm:
+                        normalized_existing.add(norm)
+
         self.page.goto(self.TENDER_NOTICE_URL, wait_until="networkidle")
 
         table = self.page.locator("table").first
@@ -133,6 +120,12 @@ class TenderParser:
             description = cells[2].inner_text().strip()
             closing_date = cells[3].inner_text().strip()
 
+            norm_no = normalize_tender_ref(tender_no)
+            if norm_no and norm_no in normalized_existing:
+                if progress_callback:
+                    progress_callback(idx + 1, total_rows, f"{tender_no} (Already in Gmail - Skipped)")
+                continue
+
             if progress_callback:
                 progress_callback(idx + 1, total_rows, tender_no)
 
@@ -157,7 +150,9 @@ class TenderParser:
                     contact_email=contact_email,
                     tender_type=tender_type,
                     raw_enquiry=raw_enquiry,
+                    already_processed=False,
                 )
             )
 
         return tenders
+

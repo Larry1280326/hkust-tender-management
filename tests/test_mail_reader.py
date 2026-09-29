@@ -4,13 +4,18 @@ import unittest
 from unittest.mock import MagicMock, patch
 from email.message import EmailMessage
 
-from mailer.google_account import (
-    GoogleAccountMailer,
+from mailer.google_account import GoogleAccountMailer
+from mailer.email_parser import (
     TenderReceivedEmail,
     extract_tender_no_from_text,
+    extract_tender_name_from_text,
+    normalize_tender_ref,
+    sanitize_tag_component,
     decode_mime_words,
     parse_gmail_labels,
 )
+
+
 
 
 class TestMailReader(unittest.TestCase):
@@ -44,6 +49,49 @@ class TestMailReader(unittest.TestCase):
         # Case 7: Irrelevant email
         subject7 = "Lunch meeting tomorrow at HKUST cafeteria"
         self.assertIsNone(extract_tender_no_from_text(subject7))
+
+    def test_extract_tender_name_from_text(self):
+        # Case 1: Standard template with tender name
+        subject1 = "Request for Tender Documents – TNA2600090 - Automated Laboratory Liquid Handling and Sampling System"
+        self.assertEqual(
+            extract_tender_name_from_text(subject1),
+            "Automated Laboratory Liquid Handling and Sampling System",
+        )
+
+        # Case 2: Reply with tender name
+        subject2 = "Re: Request for Tender Documents – PU/2026/001 - Supply of Office Laptops"
+        self.assertEqual(
+            extract_tender_name_from_text(subject2),
+            "Supply of Office Laptops",
+        )
+
+        # Case 3: Slashed tender with name
+        subject3 = "PU/2026/001 - Supply of Scientific Equipment"
+        self.assertEqual(
+            extract_tender_name_from_text(subject3),
+            "Supply of Scientific Equipment",
+        )
+
+        # Case 4: No name present
+        subject4 = "General notification without tender details"
+        self.assertIsNone(extract_tender_name_from_text(subject4))
+
+    def test_sanitize_tag_component(self):
+        # Cleans slashes and backslashes
+        self.assertEqual(
+            sanitize_tag_component("Supply / Installation of Equipment"),
+            "Supply - Installation of Equipment",
+        )
+        # Keeps normal names intact
+        self.assertEqual(
+            sanitize_tag_component("Automated Laboratory Liquid Handling and Sampling System"),
+            "Automated Laboratory Liquid Handling and Sampling System",
+        )
+        # Trims quotes and whitespace
+        self.assertEqual(
+            sanitize_tag_component('  "Renovation Works"  '),
+            "Renovation Works",
+        )
 
     def test_decode_mime_words(self):
         # Plain string
@@ -114,13 +162,53 @@ class TestMailReader(unittest.TestCase):
         tagged = mailer.tag_hkust_tender_emails(
             emails=[email_item],
             tag_prefix="HKUST-Tenders",
-            per_tender_tag=True,
+            per_tender_tag=False,
         )
         self.assertEqual(len(tagged), 1)
         self.assertEqual(tagged[0]["tender_no"], "PU/2026/001")
-        # Should apply base tag and sub-tag with sanitized slash
-        self.assertIn("HKUST-Tenders", tagged[0]["applied_tags"])
-        self.assertIn("HKUST-Tenders/PU-2026-001", tagged[0]["applied_tags"])
+        # Should apply base tag only
+        self.assertEqual(tagged[0]["applied_tags"], ["HKUST-Tenders"])
+
+    def test_normalize_tender_ref(self):
+        self.assertEqual(normalize_tender_ref("TNP2600099"), "TNP2600099")
+        self.assertEqual(normalize_tender_ref("TNP-2600099"), "TNP2600099")
+        self.assertEqual(normalize_tender_ref("tnp_2600099"), "TNP2600099")
+        self.assertEqual(normalize_tender_ref("PU/2026/001"), "PU2026001")
+        self.assertEqual(normalize_tender_ref("  EO / 2026 / 012  "), "EO2026012")
+        self.assertEqual(normalize_tender_ref(""), "")
+        self.assertEqual(normalize_tender_ref(None), "")
+
+    @patch("imaplib.IMAP4_SSL")
+    def test_get_existing_tender_numbers(self, mock_imap_cls):
+        mock_imap = MagicMock()
+        mock_imap_cls.return_value = mock_imap
+        mock_imap.login.return_value = ("OK", [b"Logged in"])
+        mock_imap.select.return_value = ("OK", [b"2"])
+        mock_imap.list.return_value = ("OK", [b'(\\HasNoChildren) "/" "HKUST Tenders"'])
+
+        # 2 messages with different tender subjects
+        msg1 = EmailMessage()
+        msg1["Subject"] = "Request for Tender Documents – TNP2600099 - Office Renovation"
+        msg2 = EmailMessage()
+        msg2["Subject"] = "Re: Request for Tender Documents – PU/2026/001"
+
+        def mock_uid(cmd, *args):
+            if cmd == "SEARCH":
+                return ("OK", [b"101 102"])
+            elif cmd == "FETCH":
+                return ("OK", [
+                    (b"101 (BODY[HEADER.FIELDS (SUBJECT)] {60}", msg1.as_bytes()),
+                    (b"102 (BODY[HEADER.FIELDS (SUBJECT)] {55}", msg2.as_bytes()),
+                ])
+            return ("OK", [])
+
+        mock_imap.uid.side_effect = mock_uid
+
+        mailer = GoogleAccountMailer(username="test@gmail.com", app_password="password123")
+        existing = mailer.get_existing_tender_numbers()
+
+        self.assertIn("TNP2600099", existing)
+        self.assertIn("PU/2026/001", existing)
 
     def _mock_imap_uid(self, cmd, *args):
         if cmd == "SEARCH":

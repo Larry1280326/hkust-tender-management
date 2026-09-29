@@ -89,11 +89,10 @@ uv run python app.py
 ```
 
 #### Interactive Main Menu:
-- **1. Scrape HKUST Tenders & Draft Emails**: Headless scraping + interactive tender checklist + Gmail draft creation.
+- **1. Scrape HKUST Tenders & Draft Emails**: Headless scraping + interactive tender checklist + Gmail draft creation with automatic tagging.
 - **2. Read Mailbox & Track HKUST Replies / Apply Tags**: Reads your Gmail inbox, identifies HKUST replies and tender references from subject lines, and applies nested tags.
-- **3. Use Cached Tenders (Offline Draft Mode)**: Use tenders from local cache without connecting to HKUST portal.
-- **4. Test Google Account Connection**: Verifies Google App Password and IMAP connection.
-- **5. Exit**
+- **3. Test Google Account Connection**: Verifies Google App Password and IMAP connection.
+- **4. Exit**
 
 #### Direct Command Line Flags:
 
@@ -113,9 +112,6 @@ uv run python app.py --read-mail --limit 20
 # Scan mailbox and automatically tag all HKUST tender emails in Gmail
 uv run python app.py --tag-tenders
 
-# Load cached tenders in offline draft mode
-uv run python app.py --cached
-
 # Run portal scraper with visible Chromium browser
 uv run python app.py --visible
 ```
@@ -124,11 +120,9 @@ uv run python app.py --visible
 
 ## Gmail Tagging & Tender Tracking
 
-When reading the mailbox, the tool checks each email's sender, subject, and body for HKUST tender numbers (e.g. `PU/2026/001`, `EO/2026/012`, or `TNL2600072`).
-
-It can automatically apply:
-1. **Base Tag**: `HKUST Tenders` (configurable via `HKUST_MAIL_TAG` in `.env`).
-2. **Per-Tender Nested Tag**: `HKUST Tenders/PU-2026-001` (organizes all correspondence for each specific tender into its own label in Gmail).
+The tool integrates Gmail labels:
+1. **Immediate Draft Tagging**: When drafts are created in Gmail, the `HKUST Tenders` label (configured by `HKUST_MAIL_TAG` in `.env`) is automatically attached to the newly saved drafts.
+2. **Mailbox Reply Tracking**: When reading the mailbox, the tool checks each email's sender, subject, and body for HKUST tenders and organizes detected emails under the `HKUST Tenders` label.
 
 ---
 

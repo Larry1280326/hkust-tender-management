@@ -17,11 +17,12 @@ HKUST_WELCOME_URL = os.getenv(
     "HKUST_WELCOME_URL", "https://w5.ab.ust.hk/jstd/td_welcome?page=td_login"
 )
 HKUST_LOGIN_URL = os.getenv("HKUST_LOGIN_URL", "https://w5.ab.ust.hk/jstd/td_login")
+HKUST_TENDER_NOTICE_URL = os.getenv(
+    "HKUST_TENDER_NOTICE_URL", "https://w5.ab.ust.hk/jstd/td_tender_notice"
+)
 HKUST_VENDOR_ID = os.getenv("HKUST_VENDOR_ID", "")
 HKUST_PASSWORD = os.getenv("HKUST_PASSWORD", "")
 
-# Playwright session state file (to cache cookies/session)
-SESSION_STATE_PATH = BASE_DIR / "session_state.json"
 
 # Company Information (Configured solely via .env)
 COMPANY_NAME = os.getenv("COMPANY_NAME", "")

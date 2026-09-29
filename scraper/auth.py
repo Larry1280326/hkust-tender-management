@@ -12,7 +12,6 @@ class HKUSTAuthManager:
 
     def __init__(self, headless: bool = True):
         self.headless = headless
-        self.session_file = config.SESSION_STATE_PATH
 
     def get_context(self, browser: Browser) -> BrowserContext:
         """Create fresh browser context."""

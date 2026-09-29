@@ -1,6 +1,6 @@
 """Rich terminal UI views, tables, and presentation helpers."""
 
-from typing import List, Optional
+from typing import List
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -32,7 +32,7 @@ def display_welcome_banner():
 def display_tender_table(tenders: List[TenderNotice]):
     """Render a structured table of active tender notices."""
     table = Table(
-        title=f"[bold yellow]Available HKUST Tender Notices ({len(tenders)} Total)[/bold yellow]",
+        title=f"[bold yellow]Available HKUST Tender Notices ({len(tenders)} New)[/bold yellow]",
         show_header=True,
         header_style="bold magenta",
         expand=True,
@@ -57,6 +57,8 @@ def display_tender_table(tenders: List[TenderNotice]):
     console.print(table)
 
 
+
+
 def display_received_emails_table(emails: List[TenderReceivedEmail]):
     """Render a structured table of detected mailbox emails and tags."""
     table = Table(
@@ -75,12 +77,13 @@ def display_received_emails_table(emails: List[TenderReceivedEmail]):
     for idx, em in enumerate(emails, start=1):
         labels_str = ", ".join(em.labels) if em.labels else "[dim]None[/dim]"
         clean_date = em.date[:16] if em.date else "N/A"
+        tender_disp = em.tender_name or em.tender_no or "[dim]-[/dim]"
         table.add_row(
             str(idx),
             clean_date,
             em.sender[:25],
             em.subject,
-            em.tender_no or "[dim]-[/dim]",
+            tender_disp[:40],
             labels_str,
         )
 
@@ -106,11 +109,15 @@ def display_draft_preview(sample: TenderEmailDraft, count: int):
 
 def display_email_detail(email_item: TenderReceivedEmail):
     """Render a detailed inspection card for a single received email."""
+    tender_info = email_item.tender_name or email_item.tender_no or "None"
+    if email_item.tender_name and email_item.tender_no:
+        tender_info = f"{email_item.tender_name} ({email_item.tender_no})"
+
     detail_text = (
         f"[bold]From:[/bold] {email_item.sender}\n"
         f"[bold]Date:[/bold] {email_item.date}\n"
         f"[bold]Subject:[/bold] {email_item.subject}\n"
-        f"[bold]Detected Tender No.:[/bold] {email_item.tender_no or 'None'}\n"
+        f"[bold]Detected Tender:[/bold] {tender_info}\n"
         f"[bold]Current Labels:[/bold] {', '.join(email_item.labels) if email_item.labels else 'None'}\n\n"
         f"[bold]Subject / Snippet:[/bold]\n{email_item.body_snippet or '[dim]No preview available[/dim]'}"
     )
