@@ -22,7 +22,6 @@ from mailer.email_parser import (
     decode_mime_words,
     extract_tender_no_from_text,
     extract_tender_name_from_text,
-    sanitize_tag_component,
     parse_gmail_labels,
     HKUST_TN_PATTERN,
     HKUST_CODE_PATTERN,
@@ -390,10 +389,9 @@ class GoogleAccountMailer:
         emails: Optional[List[TenderReceivedEmail]] = None,
         tag_prefix: Optional[str] = None,
         folder: str = "INBOX",
-        per_tender_tag: bool = False,
         known_tenders: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
-        """Tag HKUST tender emails in Gmail by checking the email title/subject."""
+        """Tag HKUST tender emails in Gmail under the HKUST Tenders tag."""
         prefix = tag_prefix or config.HKUST_MAIL_TAG
 
         if emails is None:
@@ -411,13 +409,6 @@ class GoogleAccountMailer:
 
             for e in emails:
                 tags_to_apply = [prefix]
-                tender_label_name = e.tender_name or e.tender_no
-                if per_tender_tag and tender_label_name:
-                    safe_name = sanitize_tag_component(tender_label_name)
-                    if safe_name:
-                        tender_tag = f"{prefix}/{safe_name}"
-                        tags_to_apply.append(tender_tag)
-
                 applied: List[str] = []
                 for tag in tags_to_apply:
                     if tag in e.labels:

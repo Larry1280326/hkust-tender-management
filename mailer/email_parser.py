@@ -150,27 +150,6 @@ def extract_tender_name_from_text(text: str) -> Optional[str]:
     return None
 
 
-def sanitize_tag_component(name: str, max_len: int = 100) -> str:
-    """Sanitize a tender name to be a valid, clean Gmail label component.
-
-    Replaces slashes, backslashes, quotes, and ampersands to avoid IMAP UTF-7 parse errors
-    and unintended sub-label hierarchies.
-    """
-    if not name:
-        return ""
-    # Replace & with 'and' to prevent IMAP modified UTF-7 escape errors (RFC 3501)
-    clean = re.sub(r"&", "and", name)
-    # Replace slashes, backslashes, and quotes with hyphens
-    clean = re.sub(r'[/\\"]', "-", clean).strip()
-    # Normalize consecutive whitespace
-    clean = re.sub(r"\s+", " ", clean)
-    # Collapse multiple consecutive hyphens
-    clean = re.sub(r"-+", "-", clean).strip(" -")
-    if len(clean) > max_len:
-        clean = clean[:max_len].rstrip(" -")
-    return clean
-
-
 def parse_gmail_labels(raw_metadata: str) -> List[str]:
     """Parse Gmail labels from IMAP FETCH response metadata (X-GM-LABELS)."""
     if not raw_metadata:

@@ -10,7 +10,6 @@ from mailer.email_parser import (
     extract_tender_no_from_text,
     extract_tender_name_from_text,
     normalize_tender_ref,
-    sanitize_tag_component,
     decode_mime_words,
     parse_gmail_labels,
 )
@@ -75,23 +74,6 @@ class TestMailReader(unittest.TestCase):
         # Case 4: No name present
         subject4 = "General notification without tender details"
         self.assertIsNone(extract_tender_name_from_text(subject4))
-
-    def test_sanitize_tag_component(self):
-        # Cleans slashes and backslashes
-        self.assertEqual(
-            sanitize_tag_component("Supply / Installation of Equipment"),
-            "Supply - Installation of Equipment",
-        )
-        # Keeps normal names intact
-        self.assertEqual(
-            sanitize_tag_component("Automated Laboratory Liquid Handling and Sampling System"),
-            "Automated Laboratory Liquid Handling and Sampling System",
-        )
-        # Trims quotes and whitespace
-        self.assertEqual(
-            sanitize_tag_component('  "Renovation Works"  '),
-            "Renovation Works",
-        )
 
     def test_decode_mime_words(self):
         # Plain string
@@ -162,7 +144,6 @@ class TestMailReader(unittest.TestCase):
         tagged = mailer.tag_hkust_tender_emails(
             emails=[email_item],
             tag_prefix="HKUST-Tenders",
-            per_tender_tag=False,
         )
         self.assertEqual(len(tagged), 1)
         self.assertEqual(tagged[0]["tender_no"], "PU/2026/001")

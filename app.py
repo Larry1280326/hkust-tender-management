@@ -268,7 +268,6 @@ def handle_read_and_tag_mailbox(auto_tag: bool = False, limit: int = 50, known_t
             emails=emails,
             tag_prefix=tag_prefix,
             folder=target_folder,
-            per_tender_tag=False,
             known_tenders=known_tenders,
         )
         console.print(f"[bold green][OK] Processed {len(summary)} emails in Gmail successfully![/bold green]")
@@ -302,7 +301,6 @@ def handle_read_and_tag_mailbox(auto_tag: bool = False, limit: int = 50, known_t
                     emails=emails,
                     tag_prefix=tag_prefix,
                     folder=target_folder,
-                    per_tender_tag=False,
                     known_tenders=known_tenders,
                 )
             console.print(f"[bold green][OK] Successfully tagged {len(summary)} emails in Gmail![/bold green]")
