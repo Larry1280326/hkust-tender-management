@@ -53,12 +53,6 @@ GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "").replace(" ", "")
 GMAIL_DRAFTS_URL = os.getenv("GMAIL_DRAFTS_URL", "https://mail.google.com/mail/#drafts")
 HKUST_MAIL_TAG = os.getenv("HKUST_MAIL_TAG", "HKUST Tenders")
 
-# Google API Credentials (Fallback / OAuth)
-GMAIL_CREDENTIALS_PATH = Path(
-    os.getenv("GMAIL_CREDENTIALS_PATH", str(BASE_DIR / "credentials.json"))
-)
-GMAIL_TOKEN_PATH = Path(os.getenv("GMAIL_TOKEN_PATH", str(BASE_DIR / "token.json")))
-
 # Email Template
 EMAIL_SUBJECT_TEMPLATE = "Request for Tender Documents – {tender_no} - {description}"
 

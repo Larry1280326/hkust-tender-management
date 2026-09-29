@@ -23,7 +23,6 @@ from scraper.tender_parser import (
     save_tenders_cache,
 )
 from mailer.template import generate_tender_email, TenderEmailDraft
-from mailer.gmail_api import GmailService
 from mailer.google_account import GoogleAccountMailer, TenderReceivedEmail
 from mailer.webmail_helper import generate_gmail_compose_url, export_eml_file
 from cli_views import (
@@ -185,10 +184,10 @@ def handle_tender_selection_and_drafting(tenders: List[TenderNotice]) -> None:
 
 
 def draft_emails_for_tenders(drafts: List[TenderEmailDraft]) -> None:
-    """Execute draft creation via App Password (IMAP), OAuth (Gmail API), or EML fallback."""
+    """Execute draft creation via Google App Password (IMAP) or offline EML fallback."""
     drafted_successfully = False
 
-    # Priority 1: Google Account App Password (IMAP)
+    # 1. Primary: Google Account App Password (IMAP)
     if config.GMAIL_APP_PASSWORD:
         console.print("[*] Connecting to Gmail via App Password (IMAP)...", style="cyan")
         account_mailer = GoogleAccountMailer()
@@ -205,25 +204,7 @@ def draft_emails_for_tenders(drafts: List[TenderEmailDraft]) -> None:
         except Exception as e:
             console.print(f"[!] Note on App Password drafting: {e}", style="yellow")
 
-    # Priority 2: Google Cloud OAuth (Gmail API)
-    if not drafted_successfully and config.GMAIL_CREDENTIALS_PATH.exists():
-        gmail_svc = GmailService()
-        try:
-            console.print("[*] Connecting to Gmail API...", style="cyan")
-            gmail_svc.authenticate()
-            for d in drafts:
-                if not d.recipient_email:
-                    console.print(f"[yellow]Skipping {d.tender_no}: No recipient email.[/yellow]")
-                    continue
-                res = gmail_svc.create_draft(d)
-                console.print(
-                    f"  [green][OK][/green] Draft created for [bold]{d.tender_no}[/bold] (ID: {res.get('id')})"
-                )
-            drafted_successfully = True
-        except Exception as e:
-            console.print(f"[!] Note on Gmail API: {e}", style="yellow")
-
-    # Priority 3: Offline .EML files + 1-Click Direct Gmail Compose Web Links
+    # 2. Fallback: Offline .EML files + 1-Click Direct Gmail Compose Web Links
     if not drafted_successfully:
         console.print("[*] Generating fallback offline .EML files and direct Gmail web links...", style="cyan")
         output_dir = config.BASE_DIR / "output_drafts"

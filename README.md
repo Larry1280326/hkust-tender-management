@@ -4,7 +4,8 @@ Automated workflow to:
 1. Log in to the HKUST e-Tendering Portal (`https://w5.ab.ust.hk/jstd/td_welcome?page=td_login`) and accept the Terms & Conditions.
 2. Scrape all active Tender Notices and parse the enquiry section (Contact Person name, email, phone).
 3. Allow interactive selection of suitable tenders (or keyword filtering).
-4. Automatically draft personalized enquiry emails directly in **Gmail** (with your company details and Business Registration certificate attached).
+4. Automatically draft personalized enquiry emails directly in **Gmail** (with company details and Business Registration certificate attached).
+5. Read your mailbox, track replies from HKUST, and automatically apply organized Gmail tags (e.g. `HKUST Tenders/<tender_no>`).
 
 ---
 
@@ -12,7 +13,7 @@ Automated workflow to:
 
 ### 1. First-Time Setup (Environment & Browsers)
 
-If setting up for the first time, synchronize project dependencies and install the Chromium browser for Playwright:
+Synchronize project dependencies with `uv` and install Chromium for Playwright:
 
 ```bash
 # 1. Sync dependencies and create the .venv environment
@@ -22,11 +23,11 @@ uv sync
 uv run playwright install chromium
 ```
 
-> **Tip:** While `uv run` will automatically install Python packages on first execution, running `uv sync` ensures your editor/IDE recognizes `.venv` immediately for autocomplete and linting. Installing Chromium is required for portal scraping.
+> **Tip:** Running `uv sync` ensures your editor/IDE recognizes `.venv` immediately. Installing Chromium is required for portal scraping.
 
 ---
 
-### 2. Configure Credentials
+### 2. Configure Credentials (`.env`)
 
 Copy `.env.example` to `.env` (or edit existing `.env`):
 
@@ -38,47 +39,58 @@ HKUST_PASSWORD=your_password_here
 # Path to your Business Registration (BR) Certificate file (PDF or image)
 BR_CERTIFICATE_PATH=assets/br_certificate.pdf
 
-# Company Info (Loaded from .env)
+# Google Account (Using App Password - Recommended, zero Cloud Console setup!)
+# Generate at: https://myaccount.google.com/apppasswords
+GMAIL_USER=your_email@gmail.com
+GMAIL_APP_PASSWORD=your_16_char_app_password
+GMAIL_DRAFTS_URL=https://mail.google.com/mail/#drafts
+HKUST_MAIL_TAG=HKUST Tenders
+
+# Company Information (Loaded dynamically into email drafts)
 COMPANY_NAME=Your Company Name
 CONTACT_PERSON_NAME=Contact Person, Title
 CONTACT_EMAIL=contact@example.com
 CONTACT_PHONE=12345678
 COMPANY_ADDRESS=Your Company Address
+# Optional custom sign-off override (defaults to Contact Person + Company Name)
+# SIGN_OFF="Best regards,\nYour Name\nYour Company Name"
 ```
 
-Place your official Business Registration certificate in `assets/br_certificate.pdf` (a placeholder has been provided for testing).
+Place your official Business Registration certificate in `assets/br_certificate.pdf` (or customize `BR_CERTIFICATE_PATH`).
 
 ---
 
-### 3. Gmail Integration Setup (One-time)
+### 3. Gmail Integration Setup
 
-To create drafts directly inside your Gmail account:
-1. Visit the [Google Cloud Console](https://console.cloud.google.com/).
-2. Create a new project (e.g. `HKUST-Tender-Automation`).
-3. Enable the **Gmail API** under **APIs & Services > Library**.
-4. Go to **APIs & Services > Credentials** > **Create Credentials** > **OAuth client ID**.
-5. Choose Application type: **Desktop app**.
-6. Download the OAuth credentials JSON and save it in this project folder as:
-   ```
-   credentials.json
-   ```
-7. On first run, a browser window will open asking you to sign in with your Google account. A `token.json` file will then be saved automatically for future runs.
+The application supports direct Gmail integration without requiring any Google Cloud Console configuration:
 
-*(Note: Even if `credentials.json` is not yet configured, the script will automatically export standard `.eml` files and generate one-click direct Gmail Web compose links!)*
+#### 1. Direct Gmail Drafting & Mailbox Sync (Google App Password)
+1. Ensure **2-Step Verification** is enabled on your Google Account.
+2. Go to [Google App Passwords](https://myaccount.google.com/apppasswords).
+3. Create an app password (e.g. named `HKUST Workflow`).
+4. Set `GMAIL_USER` and `GMAIL_APP_PASSWORD` in your `.env` file.
+5. **Capabilities**:
+   - Saves drafts directly to your Gmail **Drafts** folder via IMAP.
+   - Scans your inbox for HKUST replies and organizes them under Gmail labels (e.g. `HKUST Tenders/<tender_no>`).
+
+#### 2. Offline Mode & Direct Web Links (Automatic Fallback)
+If `GMAIL_APP_PASSWORD` is not configured, the tool automatically:
+- Exports ready-to-send `.eml` files to `output_drafts/` (double-click to open in Outlook or Windows Mail).
+- Generates 1-click pre-filled Gmail compose web links.
 
 ---
 
 ### 4. Run the Automation
 
-Run with `uv`:
+Run directly with `uv`:
 
 ```bash
 uv run python app.py
 ```
 
-You will see an interactive menu:
+#### Interactive Main Menu:
 - **1. Scrape HKUST Tenders & Draft Emails**: Headless scraping + interactive tender checklist + Gmail draft creation.
-- **2. Read Mailbox & Track HKUST Replies / Apply Tags**: Reads your Gmail INBOX via IMAP, finds HKUST enquiry threads and tender numbers from the subject line, displays a clean summary table, and applies Gmail tags.
+- **2. Read Mailbox & Track HKUST Replies / Apply Tags**: Reads your Gmail inbox, identifies HKUST replies and tender references from subject lines, and applies nested tags.
 - **3. Use Cached Tenders (Offline Draft Mode)**: Use tenders from local cache without connecting to HKUST portal.
 - **4. Test Google Account Connection**: Verifies Google App Password and IMAP connection.
 - **5. Exit**
@@ -86,34 +98,37 @@ You will see an interactive menu:
 #### Direct Command Line Flags:
 
 ```bash
-# Read mailbox and display HKUST tender emails / interactive tagging
-uv run python app.py --read-mail
-
-# Scan mailbox and automatically tag all HKUST tender emails in Gmail
-uv run python app.py --tag-tenders
+# Display help and all available CLI arguments
+uv run python app.py --help
 
 # Test Google IMAP / App Password connection
 uv run python app.py --test
 
-# Run portal scraper with visible Chromium browser
-uv run python app.py --visible
-
-# Display help and all available CLI arguments
-uv run python app.py --help
+# Read mailbox and display HKUST tender emails / interactive tagging
+uv run python app.py --read-mail
 
 # Custom scan limit when reading mailbox (e.g. latest 20 emails)
 uv run python app.py --read-mail --limit 20
+
+# Scan mailbox and automatically tag all HKUST tender emails in Gmail
+uv run python app.py --tag-tenders
+
+# Load cached tenders in offline draft mode
+uv run python app.py --cached
+
+# Run portal scraper with visible Chromium browser
+uv run python app.py --visible
 ```
 
 ---
 
 ## Gmail Tagging & Tender Tracking
 
-When reading the mailbox, the tool checks each email's sender and title/subject for HKUST tender numbers (e.g. `PU/2026/001` or `EO/2026/012`).
+When reading the mailbox, the tool checks each email's sender, subject, and body for HKUST tender numbers (e.g. `PU/2026/001`, `EO/2026/012`, or `TNL2600072`).
 
 It can automatically apply:
-1. **Base Tag**: `HKUST-Tenders` (configurable via `HKUST_MAIL_TAG` in `.env`).
-2. **Per-Tender Nested Tag**: `HKUST-Tenders/PU-2026-001` (organizes all correspondence for each specific tender into its own clean label in Gmail!).
+1. **Base Tag**: `HKUST Tenders` (configurable via `HKUST_MAIL_TAG` in `.env`).
+2. **Per-Tender Nested Tag**: `HKUST Tenders/PU-2026-001` (organizes all correspondence for each specific tender into its own label in Gmail).
 
 ---
 
@@ -124,7 +139,7 @@ It can automatically apply:
 
 - **Body**:
   ```
-  Dear <receipant name>,
+  Dear <Recipient Name>,
 
   I am writing to express our interest in Tender No.: <Tender No.>- <Description>.
 
@@ -143,7 +158,7 @@ It can automatically apply:
   ```
 
 - **Attachment**:
-  Attached Business Registration Certificate (`assets/br_certificate.pdf`).
+  Attached Business Registration Certificate (`assets/br_certificate.pdf` or configured path).
 
 ---
 
@@ -152,5 +167,7 @@ It can automatically apply:
 To run the automated verification suite:
 
 ```bash
-uv run python -m unittest discover tests
+uv run python -m unittest discover -s tests -v
 ```
+
+All 17 tests verify mock workflows, MIME generation, IMAP session handling, regex extraction, and `.env` dynamic loading without requiring network access.
